@@ -123,43 +123,49 @@ export default function Maintenance() {
 
   function MovementCard({ movement }: { movement: PowerBankMovement }) {
     return (
-      <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4 space-y-3">
+      <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4 space-y-3 hover:border-teal-600/40 transition-colors">
         <div className="flex items-center justify-between">
-          <span className="font-mono text-xs text-slate-300">
-            充电宝ID: {movement.powerBankId}
-          </span>
+          <div className="flex items-center gap-2">
+            <span
+              className={cn(
+                "inline-flex items-center px-2 py-0.5 rounded text-xs font-medium",
+                movementTypeColors[movement.type]
+              )}
+            >
+              {movementTypeLabels[movement.type]}
+            </span>
+          </div>
           <span className="text-xs text-slate-500">
             {relativeTime(movement.movedAt)}
           </span>
         </div>
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex-1 min-w-0">
+        <div className="text-center">
+          <span className="font-mono text-sm text-white font-medium">
+            {movement.powerBankId}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="flex-1 min-w-0 bg-slate-900/50 rounded-lg p-3 border border-slate-700/30">
+            <p className="text-xs text-slate-500 mb-1">来源点位</p>
             <p className="text-sm font-medium text-white truncate">
               {movement.fromLocationName}
             </p>
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-slate-400 font-mono mt-0.5">
               柜机 #{movement.fromCabinetNo}
             </p>
           </div>
-          <ArrowRight className="w-5 h-5 text-teal-400 flex-shrink-0" />
-          <div className="flex-1 min-w-0 text-right">
+          <div className="flex-shrink-0">
+            <ArrowRight className="w-5 h-5 text-teal-400" />
+          </div>
+          <div className="flex-1 min-w-0 bg-teal-900/20 rounded-lg p-3 border border-teal-700/30">
+            <p className="text-xs text-teal-500 mb-1">目标点位</p>
             <p className="text-sm font-medium text-white truncate">
               {movement.toLocationName}
             </p>
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-teal-300 font-mono mt-0.5">
               柜机 #{movement.toCabinetNo}
             </p>
           </div>
-        </div>
-        <div>
-          <span
-            className={cn(
-              "inline-flex items-center px-2 py-0.5 rounded text-xs font-medium",
-              movementTypeColors[movement.type]
-            )}
-          >
-            {movementTypeLabels[movement.type]}
-          </span>
         </div>
       </div>
     );
@@ -315,24 +321,111 @@ export default function Maintenance() {
           <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-lg font-semibold text-white">充电宝跨点位归还轨迹</h2>
+                <h2 className="text-lg font-semibold text-white">设备移动轨迹</h2>
                 <p className="text-sm text-slate-400 mt-1">
-                  共 {powerBankMovements.length} 次移动
+                  记录所有跨点位的设备流转，共 {powerBankMovements.length} 次移动
                 </p>
               </div>
             </div>
           </div>
           {powerBankMovements.length > 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {[...powerBankMovements]
-                .sort((a, b) => new Date(b.movedAt).getTime() - new Date(a.movedAt).getTime())
-                .map((movement) => (
-                  <MovementCard key={movement.id} movement={movement} />
-                ))}
-            </div>
+            viewMode === "kanban" ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {[...powerBankMovements]
+                  .sort(
+                    (a, b) =>
+                      new Date(b.movedAt).getTime() -
+                      new Date(a.movedAt).getTime()
+                  )
+                  .map((movement) => (
+                    <MovementCard key={movement.id} movement={movement} />
+                  ))}
+              </div>
+            ) : (
+              <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-700/50">
+                      <th className="text-left px-4 py-3 text-xs font-medium text-slate-400">
+                        充电宝ID
+                      </th>
+                      <th className="text-left px-4 py-3 text-xs font-medium text-slate-400">
+                        类型
+                      </th>
+                      <th className="text-left px-4 py-3 text-xs font-medium text-slate-400">
+                        来源点位
+                      </th>
+                      <th className="text-center px-4 py-3 text-xs font-medium text-slate-400">
+                      </th>
+                      <th className="text-left px-4 py-3 text-xs font-medium text-slate-400">
+                        目标点位
+                      </th>
+                      <th className="text-left px-4 py-3 text-xs font-medium text-slate-400">
+                        移动时间
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...powerBankMovements]
+                      .sort(
+                        (a, b) =>
+                          new Date(b.movedAt).getTime() -
+                          new Date(a.movedAt).getTime()
+                      )
+                      .map((movement) => (
+                        <tr
+                          key={movement.id}
+                          className="border-b border-slate-700/30 hover:bg-slate-700/20 transition-colors"
+                        >
+                          <td className="px-4 py-3">
+                            <span className="font-mono text-white text-xs">
+                              {movement.powerBankId}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span
+                              className={cn(
+                                "inline-flex items-center px-2 py-0.5 rounded text-xs font-medium",
+                                movementTypeColors[movement.type]
+                              )}
+                            >
+                              {movementTypeLabels[movement.type]}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <p className="text-slate-200 text-sm">
+                              {movement.fromLocationName}
+                            </p>
+                            <p className="text-xs text-slate-500 font-mono">
+                              柜机 #{movement.fromCabinetNo}
+                            </p>
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <ArrowRight className="w-4 h-4 text-teal-400 mx-auto" />
+                          </td>
+                          <td className="px-4 py-3">
+                            <p className="text-teal-300 text-sm font-medium">
+                              {movement.toLocationName}
+                            </p>
+                            <p className="text-xs text-teal-500 font-mono">
+                              柜机 #{movement.toCabinetNo}
+                            </p>
+                          </td>
+                          <td className="px-4 py-3 text-slate-400 text-xs">
+                            {relativeTime(movement.movedAt)}
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            )
           ) : (
             <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-8 text-center">
-              <p className="text-slate-500">暂无设备移动记录</p>
+              <p className="text-slate-500 mb-2">暂无设备移动记录</p>
+              <p className="text-xs text-slate-600">
+                跨点位归还或人工调拨后会在这里显示
+              </p>
             </div>
           )}
         </div>

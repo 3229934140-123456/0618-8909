@@ -50,7 +50,7 @@ interface AppState {
       totalSlots?: number;
       powerBankCount?: number;
     }
-  ) => void;
+  ) => { actualPowerBankCount: number; actualTotalSlots: number; adjusted: boolean };
   deleteCabinet: (id: string) => void;
   addCabinetToLocation: (
     locationId: string,
@@ -175,28 +175,34 @@ export const useStore = create<AppState>()(
           };
         }),
 
-      updateCabinetWithSlots: (id, data) =>
+      updateCabinetWithSlots: (id, data) => {
+        let result = {
+          actualPowerBankCount: 0,
+          actualTotalSlots: 0,
+          adjusted: false,
+        };
         set((state) => {
-          let cabinets = state.cabinets.map((cab) => {
+          const cabinets = state.cabinets.map((cab) => {
             if (cab.id !== id) return cab;
-            const newTotalSlots = data.totalSlots ?? cab.totalSlots;
-            const newPowerBankCount =
-              data.powerBankCount ?? cab.powerBanks.length;
+
+            const newTotalSlots = Math.max(
+              1,
+              data.totalSlots ?? cab.totalSlots
+            );
+            const requestedCount = data.powerBankCount ?? cab.powerBanks.length;
+            const targetCount = Math.min(requestedCount, newTotalSlots);
 
             let pbs = [...cab.powerBanks];
-            const availableCount = pbs.filter(
-              (p) => p.status === "available"
-            ).length;
 
-            if (newPowerBankCount > pbs.length) {
-              const toAdd = newPowerBankCount - pbs.length;
+            if (targetCount > pbs.length) {
+              const toAdd = targetCount - pbs.length;
               const maxSlot =
                 pbs.length > 0
                   ? Math.max(...pbs.map((p) => p.slotIndex))
                   : 0;
               for (let i = 0; i < toAdd; i++) {
                 pbs.push({
-                  id: `pb-${Date.now()}-${i}`,
+                  id: `pb-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`,
                   slotIndex: maxSlot + 1 + i,
                   batteryLevel: Math.floor(Math.random() * 40) + 60,
                   status: "available",
@@ -204,19 +210,34 @@ export const useStore = create<AppState>()(
                   movementHistory: [],
                 });
               }
-            } else if (newPowerBankCount < pbs.length) {
+            } else if (targetCount < pbs.length) {
               const available = pbs.filter((p) => p.status === "available");
               const others = pbs.filter((p) => p.status !== "available");
-              const toKeep = Math.max(newPowerBankCount - others.length, 0);
-              pbs = [...others, ...available.slice(0, toKeep)];
-              if (data.totalSlots !== undefined) {
-                pbs = pbs.slice(0, data.totalSlots);
-              }
+              const keepAvailable = Math.max(
+                targetCount - others.length,
+                0
+              );
+              pbs = [...others, ...available.slice(0, keepAvailable)];
             }
 
             const finalAvailable = pbs.filter(
               (p) => p.status === "available"
             ).length;
+
+            if (
+              data.powerBankCount !== undefined &&
+              data.powerBankCount !== pbs.length
+            ) {
+              result.adjusted = true;
+            }
+            if (
+              data.totalSlots !== undefined &&
+              data.totalSlots !== newTotalSlots
+            ) {
+              result.adjusted = true;
+            }
+            result.actualPowerBankCount = pbs.length;
+            result.actualTotalSlots = newTotalSlots;
 
             return {
               ...cab,
@@ -232,7 +253,9 @@ export const useStore = create<AppState>()(
             cabinets,
             locations: recalcLocationStats(state.locations, cabinets),
           };
-        }),
+        });
+        return result;
+      },
 
       deleteCabinet: (id) =>
         set((state) => {
@@ -405,135 +428,123 @@ export const useStore = create<AppState>()(
 
         const pbBattery = Math.floor(Math.random() * 30) + 20;
         const threshold = state.systemThreshold.lowBatteryThreshold;
+        const pbNewStatus: PowerBank["status"] =
+          pbBattery < threshold ? "needs_recycle" : "charging";
 
-        let originalPB: PowerBank | null = null;
-        let cabinets = state.cabinets;
+        let newMovements: PowerBankMovement[] = [];
+        let updatedCabinets: Cabinet[];
 
         if (borrowCabinet && borrowCabinet.id === targetCabinet.id) {
-          const existingPB = targetCabinet.powerBanks.find(
-            (p) => p.id === rental.powerBankId
-          );
-          if (existingPB) {
-            const updatedPB: PowerBank = {
-              ...existingPB,
-              status:
-                pbBattery < threshold ? "needs_recycle" : "charging",
-              batteryLevel: pbBattery,
-              lastReportTime: now.toISOString(),
-            };
-            const updatedTargetCabinet: Cabinet = {
-              ...targetCabinet,
-              powerBanks: targetCabinet.powerBanks.map((p) =>
-                p.id === existingPB.id ? updatedPB : p
-              ),
-              availableCount:
-                targetCabinet.availableCount +
-                (updatedPB.status === "available" ? 1 : 0),
+          updatedCabinets = state.cabinets.map((cab) => {
+            if (cab.id !== targetCabinet!.id) return cab;
+            const updatedPBs = cab.powerBanks.map((p) =>
+              p.id === rental.powerBankId
+                ? {
+                    ...p,
+                    status: pbNewStatus,
+                    batteryLevel: pbBattery,
+                    lastReportTime: now.toISOString(),
+                  }
+                : p
+            );
+            const availableCount = updatedPBs.filter(
+              (p) => p.status === "available"
+            ).length;
+            return {
+              ...cab,
+              powerBanks: updatedPBs,
+              availableCount,
               lastHeartbeat: now.toISOString(),
             };
-            cabinets = state.cabinets.map((c) =>
-              c.id === targetCabinet!.id ? updatedTargetCabinet : c
-            );
-          }
+          });
         } else {
           let originalPBFromBorrow: PowerBank | null = null;
-          cabinets = state.cabinets
-            .map((cab) => {
-              if (cab.id === rental.cabinetId) {
-                originalPBFromBorrow =
-                  cab.powerBanks.find(
-                    (p) => p.id === rental.powerBankId
-                  ) || null;
-                const filtered = cab.powerBanks.filter(
-                  (p) => p.id !== rental.powerBankId
-                );
-                const availableInOrig = filtered.filter(
-                  (p) => p.status === "available"
-                ).length;
-                return {
-                  ...cab,
-                  powerBanks: filtered,
-                  availableCount: availableInOrig,
-                  lastHeartbeat: now.toISOString(),
-                };
-              }
-              return cab;
-            })
-            .map((cab) => {
-              if (cab.id === targetCabinet!.id) {
-                const maxSlot =
-                  cab.powerBanks.length > 0
-                    ? Math.max(...cab.powerBanks.map((p) => p.slotIndex))
-                    : 0;
-                const newPB: PowerBank = {
-                  id: rental.powerBankId!,
-                  slotIndex: maxSlot + 1,
-                  batteryLevel: pbBattery,
-                  status:
-                    pbBattery < threshold ? "needs_recycle" : "charging",
-                  lastReportTime: now.toISOString(),
-                  movementHistory: [
-                    ...(originalPBFromBorrow?.movementHistory || []),
-                  ],
-                };
 
-                if (borrowCabinet && borrowLoc && targetCabinet) {
-                  const movement: PowerBankMovement = {
-                    id: `move-${Date.now()}`,
-                    powerBankId: rental.powerBankId!,
-                    fromLocationId: borrowCabinet.locationId,
-                    fromLocationName: borrowLoc.name,
-                    fromCabinetId: borrowCabinet.id,
-                    fromCabinetNo: borrowCabinet.cabinetNo,
-                    toLocationId: targetCabinet.locationId,
-                    toLocationName: returnLoc.name,
-                    toCabinetId: targetCabinet.id,
-                    toCabinetNo: targetCabinet.cabinetNo,
-                    movedAt: now.toISOString(),
-                    type: "rental_return",
-                  };
-                  newPB.movementHistory?.push(movement);
+          updatedCabinets = state.cabinets.map((cab) => {
+            if (cab.id === rental.cabinetId) {
+              originalPBFromBorrow =
+                cab.powerBanks.find((p) => p.id === rental.powerBankId) ||
+                null;
+              const filtered = cab.powerBanks.filter(
+                (p) => p.id !== rental.powerBankId
+              );
+              const availableCount = filtered.filter(
+                (p) => p.status === "available"
+              ).length;
+              return {
+                ...cab,
+                powerBanks: filtered,
+                availableCount,
+                lastHeartbeat: now.toISOString(),
+              };
+            }
+            if (cab.id === targetCabinet!.id) {
+              const maxSlot =
+                cab.powerBanks.length > 0
+                  ? Math.max(...cab.powerBanks.map((p) => p.slotIndex))
+                  : 0;
+              const prevHistory =
+                originalPBFromBorrow?.movementHistory || [];
 
-                  set((state) => ({
-                    powerBankMovements: [movement, ...state.powerBankMovements],
-                  }));
-                }
+              const movement: PowerBankMovement = {
+                id: `move-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                powerBankId: rental.powerBankId!,
+                fromLocationId: borrowCabinet?.locationId || "",
+                fromLocationName: borrowLoc?.name || "",
+                fromCabinetId: borrowCabinet?.id || "",
+                fromCabinetNo: borrowCabinet?.cabinetNo || "",
+                toLocationId: targetCabinet!.locationId,
+                toLocationName: returnLoc.name,
+                toCabinetId: targetCabinet!.id,
+                toCabinetNo: targetCabinet!.cabinetNo,
+                movedAt: now.toISOString(),
+                type: "rental_return",
+              };
+              newMovements.push(movement);
 
-                const newPBs = [...cab.powerBanks, newPB];
-                return {
-                  ...cab,
-                  powerBanks: newPBs,
-                  availableCount:
-                    cab.availableCount +
-                    (newPB.status === "available" ? 1 : 0),
-                  lastHeartbeat: now.toISOString(),
-                };
-              }
-              return cab;
-            });
+              const newPB: PowerBank = {
+                id: rental.powerBankId!,
+                slotIndex: maxSlot + 1,
+                batteryLevel: pbBattery,
+                status: pbNewStatus,
+                lastReportTime: now.toISOString(),
+                movementHistory: [...prevHistory, movement],
+              };
+
+              const newPBs = [...cab.powerBanks, newPB];
+              const availableCount = newPBs.filter(
+                (p) => p.status === "available"
+              ).length;
+              return {
+                ...cab,
+                powerBanks: newPBs,
+                availableCount,
+                lastHeartbeat: now.toISOString(),
+              };
+            }
+            return cab;
+          });
         }
 
-        set((state) => {
-          const finalCabinets = cabinets;
-          return {
-            cabinets: finalCabinets,
-            rentalRecords: state.rentalRecords.map((r) =>
-              r.id === rentalId
-                ? {
-                    ...r,
-                    returnLocationId,
-                    returnLocationName: returnLoc.name,
-                    returnTime: now.toISOString(),
-                    duration: durationMinutes,
-                    fee,
-                    status: "returned" as const,
-                    paymentStatus: "paid" as const,
-                  }
-                : r
-            ),
-            locations: recalcLocationStats(state.locations, finalCabinets),
-          };
-        });
+        set((state) => ({
+          cabinets: updatedCabinets,
+          rentalRecords: state.rentalRecords.map((r) =>
+            r.id === rentalId
+              ? {
+                  ...r,
+                  returnLocationId,
+                  returnLocationName: returnLoc.name,
+                  returnTime: now.toISOString(),
+                  duration: durationMinutes,
+                  fee,
+                  status: "returned" as const,
+                  paymentStatus: "paid" as const,
+                }
+              : r
+          ),
+          powerBankMovements: [...newMovements, ...state.powerBankMovements],
+          locations: recalcLocationStats(state.locations, updatedCabinets),
+        }));
         return true;
       },
 
@@ -542,8 +553,9 @@ export const useStore = create<AppState>()(
         const threshold = state.systemThreshold.lowBatteryThreshold;
         const lowStockThreshold = state.systemThreshold.lowStockThreshold;
         let newTasks: MaintenanceTask[] = [];
+        let newMovements: PowerBankMovement[] = [];
 
-        const updatedCabinets = state.cabinets.map((cab) => {
+        let updatedCabinets = state.cabinets.map((cab) => {
           const updatedPBs = cab.powerBanks.map((pb) => {
             if (pb.status === "borrowed" || pb.status === "fault") return pb;
 
@@ -589,6 +601,110 @@ export const useStore = create<AppState>()(
             lastHeartbeat: new Date().toISOString(),
           };
         });
+
+        const activeLocations = state.locations.filter(
+          (l) => l.status === "active"
+        );
+        if (
+          Math.random() < 0.4 &&
+          activeLocations.length >= 2
+        ) {
+          const onlineCabs = updatedCabinets.filter(
+            (c) => c.status === "online" && c.powerBanks.length > 0
+          );
+          const fromCabs = onlineCabs.filter(
+            (c) => c.powerBanks.some((p) => p.status === "available")
+          );
+          const toCabs = onlineCabs.filter(
+            (c) => c.powerBanks.length < c.totalSlots
+          );
+
+          if (fromCabs.length > 0 && toCabs.length > 0) {
+            const fromCab = fromCabs[Math.floor(Math.random() * fromCabs.length)];
+            let toCab = toCabs[Math.floor(Math.random() * toCabs.length)];
+            
+            let attempts = 0;
+            while (toCab.locationId === fromCab.locationId && attempts < 10) {
+              toCab = toCabs[Math.floor(Math.random() * toCabs.length)];
+              attempts++;
+            }
+
+            if (toCab.locationId !== fromCab.locationId) {
+              const availablePBs = fromCab.powerBanks.filter(
+                (p) => p.status === "available"
+              );
+              if (availablePBs.length > 0) {
+                const movedPB =
+                  availablePBs[
+                    Math.floor(Math.random() * availablePBs.length)
+                  ];
+
+                const fromLoc = state.locations.find(
+                  (l) => l.id === fromCab.locationId
+                );
+                const toLoc = state.locations.find(
+                  (l) => l.id === toCab.locationId
+                );
+
+                const movement: PowerBankMovement = {
+                  id: `move-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                  powerBankId: movedPB.id,
+                  fromLocationId: fromCab.locationId,
+                  fromLocationName: fromLoc?.name || "",
+                  fromCabinetId: fromCab.id,
+                  fromCabinetNo: fromCab.cabinetNo,
+                  toLocationId: toCab.locationId,
+                  toLocationName: toLoc?.name || "",
+                  toCabinetId: toCab.id,
+                  toCabinetNo: toCab.cabinetNo,
+                  movedAt: new Date().toISOString(),
+                  type: "manual_transfer",
+                };
+                newMovements.push(movement);
+
+                updatedCabinets = updatedCabinets.map((cab) => {
+                  if (cab.id === fromCab.id) {
+                    const newPBs = cab.powerBanks.filter(
+                      (p) => p.id !== movedPB.id
+                    );
+                    return {
+                      ...cab,
+                      powerBanks: newPBs,
+                      availableCount:
+                        cab.availableCount - 1,
+                      lastHeartbeat: new Date().toISOString(),
+                    };
+                  }
+                  if (cab.id === toCab.id) {
+                    const maxSlot =
+                      cab.powerBanks.length > 0
+                        ? Math.max(
+                            ...cab.powerBanks.map((p) => p.slotIndex)
+                          )
+                        : 0;
+                    const newPB: PowerBank = {
+                      ...movedPB,
+                      slotIndex: maxSlot + 1,
+                      lastReportTime: new Date().toISOString(),
+                      movementHistory: [
+                        ...(movedPB.movementHistory || []),
+                        movement,
+                      ],
+                    };
+                    return {
+                      ...cab,
+                      powerBanks: [...cab.powerBanks, newPB],
+                      availableCount:
+                        cab.availableCount + 1,
+                      lastHeartbeat: new Date().toISOString(),
+                    };
+                  }
+                  return cab;
+                });
+              }
+            }
+          }
+        }
 
         const allCabinets = updatedCabinets;
         const locationsNeedRestock: {
@@ -682,6 +798,7 @@ export const useStore = create<AppState>()(
         set((state) => ({
           cabinets: allCabinets,
           maintenanceTasks: [...newTasks, ...state.maintenanceTasks],
+          powerBankMovements: [...newMovements, ...state.powerBankMovements],
           locations: recalcLocationStats(state.locations, allCabinets),
         }));
       },

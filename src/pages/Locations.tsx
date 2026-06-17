@@ -2,6 +2,7 @@ import { useState, Fragment } from "react";
 import { useStore } from "@/store";
 import { LOCATION_TYPE_LABELS, CABINET_STATUS_LABELS } from "@/types";
 import type { Location, Cabinet } from "@/types";
+import { cn } from "@/lib/utils";
 import {
   Search,
   Plus,
@@ -18,6 +19,8 @@ import {
   MoreHorizontal,
   Trash2,
   Check,
+  AlertTriangle,
+  CheckCircle2,
 } from "lucide-react";
 
 const TYPE_OPTIONS = [
@@ -517,6 +520,7 @@ function DetailPanel({
   const [editCabinetStatus, setEditCabinetStatus] = useState<Cabinet["status"]>("online");
   const [editTotalSlots, setEditTotalSlots] = useState(0);
   const [editPowerBankCount, setEditPowerBankCount] = useState(0);
+  const [saveMessage, setSaveMessage] = useState<{ type: "info" | "warning" | "success"; text: string } | null>(null);
 
   const Icon = TYPE_ICON[location.type];
 
@@ -546,12 +550,30 @@ function DetailPanel({
 
   const saveEdit = () => {
     if (!editCabinetNo.trim() || !editingCabinetId) return;
-    updateCabinetWithSlots(editingCabinetId, {
+    const result = updateCabinetWithSlots(editingCabinetId, {
       cabinetNo: editCabinetNo.trim(),
       status: editCabinetStatus,
       totalSlots: Number(editTotalSlots),
       powerBankCount: Number(editPowerBankCount),
     });
+
+    if (result.adjusted) {
+      const cab = cabinets.find((c) => c.id === editingCabinetId);
+      const nonAvailableCount = cab
+        ? cab.powerBanks.filter((p) => p.status !== "available").length
+        : 0;
+      setSaveMessage({
+        type: "warning",
+        text: `数量已调整：实际充电宝 ${result.actualPowerBankCount} 个（有 ${nonAvailableCount} 个非可用状态设备无法移除），总槽位 ${result.actualTotalSlots} 个`,
+      });
+    } else {
+      setSaveMessage({
+        type: "success",
+        text: "保存成功",
+      });
+    }
+
+    setTimeout(() => setSaveMessage(null), 4000);
     cancelEdit();
   };
 
@@ -633,6 +655,27 @@ function DetailPanel({
             </button>
           )}
         </div>
+
+        {saveMessage && (
+          <div
+            className={cn(
+              "mb-3 px-4 py-2.5 rounded-lg text-sm flex items-center gap-2",
+              saveMessage.type === "warning"
+                ? "bg-amber-500/15 text-amber-300 border border-amber-500/30"
+                : saveMessage.type === "success"
+                  ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
+                  : "bg-blue-500/15 text-blue-300 border border-blue-500/30"
+            )}
+          >
+            {saveMessage.type === "warning" && (
+              <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+            )}
+            {saveMessage.type === "success" && (
+              <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+            )}
+            <span>{saveMessage.text}</span>
+          </div>
+        )}
 
         {addingCabinet && (
           <div className="mb-3 rounded-lg bg-slate-800/60 border border-slate-700/50 p-3 flex items-end gap-3">
