@@ -1,6 +1,6 @@
 import { useState, Fragment } from "react";
 import { useStore } from "@/store";
-import { LOCATION_TYPE_LABELS } from "@/types";
+import { LOCATION_TYPE_LABELS, CABINET_STATUS_LABELS } from "@/types";
 import type { Location, Cabinet } from "@/types";
 import {
   Search,
@@ -16,6 +16,8 @@ import {
   Hotel,
   Train,
   MoreHorizontal,
+  Trash2,
+  Check,
 } from "lucide-react";
 
 const TYPE_OPTIONS = [
@@ -90,6 +92,8 @@ interface FormState {
   businessHours: string;
   longitude: string;
   latitude: string;
+  cabinetNo: string;
+  slotCount: number;
 }
 
 const emptyForm: FormState = {
@@ -99,10 +103,12 @@ const emptyForm: FormState = {
   businessHours: "",
   longitude: "",
   latitude: "",
+  cabinetNo: "",
+  slotCount: 12,
 };
 
 export default function Locations() {
-  const { locations, cabinets, addLocation } = useStore();
+  const { locations, cabinets, addLocationWithCabinets, addCabinetToLocation, updateCabinet, deleteCabinet } = useStore();
 
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
@@ -120,24 +126,28 @@ export default function Locations() {
   });
 
   const handleSave = () => {
-    if (!form.name.trim()) return;
-    addLocation({
-      id: `loc-${Date.now()}`,
-      name: form.name.trim(),
-      type: form.type,
-      address: form.address.trim(),
-      businessHours: form.businessHours.trim(),
-      longitude: Number(form.longitude) || 0,
-      latitude: Number(form.latitude) || 0,
-      cabinetCount: 0,
-      totalSlots: 0,
-      availablePowerBanks: 0,
-      borrowRate: 0,
-      dailyIncome: 0,
-      faultRate: 0,
-      status: "active",
-      createdAt: new Date().toISOString().slice(0, 10),
-    });
+    if (!form.name.trim() || !form.cabinetNo.trim()) return;
+    addLocationWithCabinets(
+      {
+        id: `loc-${Date.now()}`,
+        name: form.name.trim(),
+        type: form.type,
+        address: form.address.trim(),
+        businessHours: form.businessHours.trim(),
+        longitude: Number(form.longitude) || 0,
+        latitude: Number(form.latitude) || 0,
+        cabinetCount: 0,
+        totalSlots: 0,
+        availablePowerBanks: 0,
+        borrowRate: 0,
+        dailyIncome: 0,
+        faultRate: 0,
+        status: "active",
+        createdAt: new Date().toISOString().slice(0, 10),
+      },
+      form.cabinetNo.trim(),
+      Number(form.slotCount) || 12
+    );
     setForm(emptyForm);
     setDrawerOpen(false);
   };
@@ -433,6 +443,38 @@ export default function Locations() {
                   />
                 </div>
               </div>
+              <div className="border-t border-slate-700/50 pt-4">
+                <h3 className="text-sm font-medium text-teal-400 mb-3">设备信息</h3>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-1.5">
+                      柜机编号
+                    </label>
+                    <input
+                      value={form.cabinetNo}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, cabinetNo: e.target.value }))
+                      }
+                      placeholder="如 BJ-NEW-001"
+                      className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-teal-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-1.5">
+                      充电宝数量(槽位)
+                    </label>
+                    <input
+                      type="number"
+                      value={form.slotCount}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, slotCount: Number(e.target.value) || 12 }))
+                      }
+                      min={1}
+                      className="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-teal-500"
+                    />
+                  </div>
+                </div>
+              </div>
             </div>
             <div className="absolute bottom-0 left-0 right-0 px-6 py-4 border-t border-slate-700/50 flex items-center gap-3 bg-slate-900">
               <button
@@ -464,7 +506,53 @@ function DetailPanel({
   cabinets: Cabinet[];
   onClose: () => void;
 }) {
+  const { addCabinetToLocation, updateCabinet, deleteCabinet } = useStore();
+
+  const [addingCabinet, setAddingCabinet] = useState(false);
+  const [newCabinetNo, setNewCabinetNo] = useState("");
+  const [newSlotCount, setNewSlotCount] = useState(12);
+
+  const [editingCabinetId, setEditingCabinetId] = useState<string | null>(null);
+  const [editCabinetNo, setEditCabinetNo] = useState("");
+  const [editCabinetStatus, setEditCabinetStatus] = useState<Cabinet["status"]>("online");
+
   const Icon = TYPE_ICON[location.type];
+
+  const handleAddCabinet = () => {
+    if (!newCabinetNo.trim()) return;
+    addCabinetToLocation(location.id, newCabinetNo.trim(), Number(newSlotCount) || 12);
+    setNewCabinetNo("");
+    setNewSlotCount(12);
+    setAddingCabinet(false);
+  };
+
+  const startEdit = (cab: Cabinet) => {
+    setEditingCabinetId(cab.id);
+    setEditCabinetNo(cab.cabinetNo);
+    setEditCabinetStatus(cab.status);
+  };
+
+  const cancelEdit = () => {
+    setEditingCabinetId(null);
+    setEditCabinetNo("");
+    setEditCabinetStatus("online");
+  };
+
+  const saveEdit = () => {
+    if (!editCabinetNo.trim() || !editingCabinetId) return;
+    updateCabinet(editingCabinetId, {
+      cabinetNo: editCabinetNo.trim(),
+      status: editCabinetStatus,
+    });
+    cancelEdit();
+  };
+
+  const handleDelete = (cab: Cabinet) => {
+    if (window.confirm(`确定删除柜机 ${cab.cabinetNo} 吗？`)) {
+      deleteCabinet(cab.id);
+    }
+  };
+
   return (
     <div className="bg-slate-800/30 px-8 py-5 space-y-5">
       <div className="flex items-center justify-between">
@@ -523,9 +611,62 @@ function DetailPanel({
       </div>
 
       <div>
-        <h4 className="text-sm font-medium text-slate-300 mb-2">
-          关联柜机（{cabinets.length}）
-        </h4>
+        <div className="flex items-center justify-between mb-2">
+          <h4 className="text-sm font-medium text-slate-300">
+            关联柜机（{cabinets.length}）
+          </h4>
+          {!addingCabinet && (
+            <button
+              onClick={() => setAddingCabinet(true)}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-md bg-teal-600/20 text-teal-400 text-xs font-medium hover:bg-teal-600/30 transition-colors"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              添加柜机
+            </button>
+          )}
+        </div>
+
+        {addingCabinet && (
+          <div className="mb-3 rounded-lg bg-slate-800/60 border border-slate-700/50 p-3 flex items-end gap-3">
+            <div className="flex-1">
+              <label className="block text-xs text-slate-400 mb-1">柜机编号</label>
+              <input
+                value={newCabinetNo}
+                onChange={(e) => setNewCabinetNo(e.target.value)}
+                placeholder="如 BJ-NEW-001"
+                className="w-full px-2.5 py-1.5 rounded-md bg-slate-900 border border-slate-700 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-teal-500"
+              />
+            </div>
+            <div className="w-28">
+              <label className="block text-xs text-slate-400 mb-1">槽位数</label>
+              <input
+                type="number"
+                value={newSlotCount}
+                onChange={(e) => setNewSlotCount(Number(e.target.value) || 12)}
+                min={1}
+                className="w-full px-2.5 py-1.5 rounded-md bg-slate-900 border border-slate-700 text-sm text-white focus:outline-none focus:border-teal-500"
+              />
+            </div>
+            <button
+              onClick={handleAddCabinet}
+              disabled={!newCabinetNo.trim()}
+              className="px-3 py-1.5 rounded-md bg-teal-600 hover:bg-teal-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-medium transition-colors"
+            >
+              确认
+            </button>
+            <button
+              onClick={() => {
+                setAddingCabinet(false);
+                setNewCabinetNo("");
+                setNewSlotCount(12);
+              }}
+              className="px-3 py-1.5 rounded-md bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs font-medium transition-colors"
+            >
+              取消
+            </button>
+          </div>
+        )}
+
         {cabinets.length > 0 ? (
           <div className="rounded-lg border border-slate-700/50 overflow-hidden">
             <table className="w-full text-sm">
@@ -539,48 +680,124 @@ function DetailPanel({
                     可用数
                   </th>
                   <th className="px-4 py-2 font-medium">状态</th>
+                  <th className="px-4 py-2 font-medium text-center">操作</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-700/30">
-                {cabinets.map((cab) => (
-                  <tr
-                    key={cab.id}
-                    className="hover:bg-slate-800/30 transition-colors"
-                  >
-                    <td className="px-4 py-2 text-white">{cab.cabinetNo}</td>
-                    <td className="px-4 py-2 text-center text-slate-300">
-                      {cab.totalSlots}
-                    </td>
-                    <td className="px-4 py-2 text-center">
-                      <span
-                        className={
-                          cab.availableCount <= 3
-                            ? "text-red-400"
-                            : "text-teal-400"
-                        }
-                      >
-                        {cab.availableCount}
-                      </span>
-                    </td>
-                    <td className="px-4 py-2">
-                      <span
-                        className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                          cab.status === "online"
-                            ? "bg-green-500/15 text-green-400"
-                            : cab.status === "fault"
-                              ? "bg-red-500/15 text-red-400"
-                              : "bg-slate-500/15 text-slate-400"
-                        }`}
-                      >
-                        {cab.status === "online"
-                          ? "在线"
-                          : cab.status === "fault"
-                            ? "故障"
-                            : "离线"}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
+                {cabinets.map((cab) =>
+                  editingCabinetId === cab.id ? (
+                    <tr key={cab.id} className="bg-slate-800/50">
+                      <td className="px-4 py-2">
+                        <input
+                          value={editCabinetNo}
+                          onChange={(e) => setEditCabinetNo(e.target.value)}
+                          className="w-full px-2.5 py-1 rounded-md bg-slate-900 border border-slate-700 text-sm text-white focus:outline-none focus:border-teal-500"
+                        />
+                      </td>
+                      <td className="px-4 py-2 text-center text-slate-300">
+                        {cab.totalSlots}
+                      </td>
+                      <td className="px-4 py-2 text-center">
+                        <span
+                          className={
+                            cab.availableCount <= 3
+                              ? "text-red-400"
+                              : "text-teal-400"
+                          }
+                        >
+                          {cab.availableCount}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2">
+                        <select
+                          value={editCabinetStatus}
+                          onChange={(e) =>
+                            setEditCabinetStatus(e.target.value as Cabinet["status"])
+                          }
+                          className="px-2.5 py-1 rounded-md bg-slate-900 border border-slate-700 text-sm text-white focus:outline-none focus:border-teal-500 appearance-none"
+                        >
+                          {(["online", "offline", "fault"] as Cabinet["status"][]).map(
+                            (s) => (
+                              <option key={s} value={s}>
+                                {CABINET_STATUS_LABELS[s]}
+                              </option>
+                            )
+                          )}
+                        </select>
+                      </td>
+                      <td className="px-4 py-2">
+                        <div className="flex items-center justify-center gap-1">
+                          <button
+                            onClick={saveEdit}
+                            className="p-1 rounded-md text-teal-400 hover:bg-slate-700/50 transition-colors"
+                            title="保存"
+                          >
+                            <Check className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={cancelEdit}
+                            className="p-1 rounded-md text-slate-400 hover:bg-slate-700/50 transition-colors"
+                            title="取消"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : (
+                    <tr
+                      key={cab.id}
+                      className="hover:bg-slate-800/30 transition-colors"
+                    >
+                      <td className="px-4 py-2 text-white">{cab.cabinetNo}</td>
+                      <td className="px-4 py-2 text-center text-slate-300">
+                        {cab.totalSlots}
+                      </td>
+                      <td className="px-4 py-2 text-center">
+                        <span
+                          className={
+                            cab.availableCount <= 3
+                              ? "text-red-400"
+                              : "text-teal-400"
+                          }
+                        >
+                          {cab.availableCount}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2">
+                        <span
+                          className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                            cab.status === "online"
+                              ? "bg-green-500/15 text-green-400"
+                              : cab.status === "fault"
+                                ? "bg-red-500/15 text-red-400"
+                                : "bg-slate-500/15 text-slate-400"
+                          }`}
+                        >
+                          {CABINET_STATUS_LABELS[cab.status]}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2">
+                        <div className="flex items-center justify-center gap-1">
+                          <button
+                            onClick={() => startEdit(cab)}
+                            className="p-1 rounded-md text-slate-400 hover:text-amber-400 hover:bg-slate-700/50 transition-colors"
+                            title="编辑"
+                          >
+                            <Edit className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleDelete(cab)}
+                            className="p-1 rounded-md text-slate-400 hover:text-red-400 hover:bg-slate-700/50 transition-colors"
+                            title="删除"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                )}
               </tbody>
             </table>
           </div>

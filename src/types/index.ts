@@ -51,6 +51,8 @@ export interface RentalRecord {
   fee?: number;
   status: "borrowed" | "returned" | "overdue" | "abnormal";
   paymentStatus: "paid" | "unpaid" | "refunded";
+  cabinetId?: string;
+  powerBankId?: string;
 }
 
 export interface MaintenanceTask {

@@ -15,6 +15,8 @@ import {
   BatteryLow,
   BatteryCharging,
   BatteryWarning,
+  Radio,
+  CheckCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -315,12 +317,13 @@ function DeviceCard({ cabinet, onClick }: { cabinet: Cabinet; onClick: () => voi
 }
 
 export default function Devices() {
-  const { cabinets, locations } = useStore();
+  const { cabinets, locations, simulateDeviceReport } = useStore();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [locationFilter, setLocationFilter] = useState<string>("all");
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [selectedCabinet, setSelectedCabinet] = useState<Cabinet | null>(null);
+  const [reportSuccess, setReportSuccess] = useState(false);
 
   const filtered = cabinets.filter((c) => {
     if (search && !c.cabinetNo.toLowerCase().includes(search.toLowerCase())) return false;
@@ -340,6 +343,25 @@ export default function Devices() {
           <Server className="w-6 h-6 text-teal-400" />
           <h1 className="text-xl font-semibold text-white">设备管理</h1>
           <span className="text-sm text-slate-500">({filtered.length} 台)</span>
+        </div>
+        <div className="flex items-center gap-3">
+          {reportSuccess && (
+            <span className="flex items-center gap-1 text-emerald-400 text-sm">
+              <CheckCircle className="w-4 h-4" />
+              已上报
+            </span>
+          )}
+          <button
+            onClick={() => {
+              simulateDeviceReport();
+              setReportSuccess(true);
+              setTimeout(() => setReportSuccess(false), 2000);
+            }}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-amber-600/20 text-amber-400 hover:bg-amber-600/30 text-sm font-medium transition-colors border border-amber-600/30"
+          >
+            <Radio className="w-4 h-4" />
+            模拟设备上报
+          </button>
         </div>
       </div>
 

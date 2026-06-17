@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useStore } from "@/store";
 import { RENTAL_STATUS_LABELS, PAYMENT_STATUS_LABELS } from "@/types";
 import type { RentalRecord } from "@/types";
@@ -13,6 +13,8 @@ import {
   X,
   AlertTriangle,
   CheckCircle2,
+  Zap,
+  RotateCcw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -32,6 +34,10 @@ function formatDuration(minutes?: number): string {
   return `${h}h ${m}m`;
 }
 
+function getElapsedMinutes(borrowTime: string): number {
+  return Math.max(1, Math.round((Date.now() - new Date(borrowTime).getTime()) / 60000));
+}
+
 const STATUS_COLORS: Record<RentalRecord["status"], string> = {
   borrowed: "bg-teal-500/20 text-teal-400",
   returned: "bg-emerald-500/20 text-emerald-400",
@@ -48,6 +54,9 @@ const PAYMENT_COLORS: Record<RentalRecord["paymentStatus"], string> = {
 export default function Rentals() {
   const rentalRecords = useStore((s) => s.rentalRecords);
   const billingRules = useStore((s) => s.billingRules);
+  const locations = useStore((s) => s.locations);
+  const borrowPowerBank = useStore((s) => s.borrowPowerBank);
+  const returnPowerBank = useStore((s) => s.returnPowerBank);
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -55,6 +64,34 @@ export default function Rentals() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [selected, setSelected] = useState<RentalRecord | null>(null);
+
+  const [borrowOpen, setBorrowOpen] = useState(false);
+  const [borrowLocationId, setBorrowLocationId] = useState("");
+  const [borrowName, setBorrowName] = useState("");
+  const [borrowPhone, setBorrowPhone] = useState("");
+
+  const [returnRental, setReturnRental] = useState<RentalRecord | null>(null);
+  const [returnLocationId, setReturnLocationId] = useState("");
+  const [returnElapsed, setReturnElapsed] = useState(0);
+
+  const [toast, setToast] = useState<string | null>(null);
+
+  const activeLocations = locations.filter((l) => l.status === "active");
+
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), 3000);
+    return () => clearTimeout(timer);
+  }, [toast]);
+
+  useEffect(() => {
+    if (!returnRental) return;
+    setReturnElapsed(getElapsedMinutes(returnRental.borrowTime));
+    const timer = setInterval(() => {
+      setReturnElapsed(getElapsedMinutes(returnRental!.borrowTime));
+    }, 60000);
+    return () => clearInterval(timer);
+  }, [returnRental]);
 
   const freeMinutes = billingRules[0]?.freeMinutes ?? 5;
   const pricePerHour = billingRules[0]?.pricePerHour ?? 3;
@@ -88,10 +125,62 @@ export default function Rentals() {
       ? Math.max(0, selected.duration - freeMinutes)
       : 0;
 
+  const handleBorrow = () => {
+    if (!borrowLocationId || !borrowName.trim() || !borrowPhone.trim()) return;
+    const rentalId = borrowPowerBank(borrowLocationId, borrowName.trim(), borrowPhone.trim());
+    if (rentalId) {
+      setToast(`借出成功！记录编号: ${rentalId}`);
+      setBorrowOpen(false);
+      setBorrowLocationId("");
+      setBorrowName("");
+      setBorrowPhone("");
+    } else {
+      setToast("借出失败，该点位暂无可用充电宝");
+    }
+  };
+
+  const handleReturn = () => {
+    if (!returnRental || !returnLocationId) return;
+    const ok = returnPowerBank(returnRental.id, returnLocationId);
+    if (ok) {
+      const charged = Math.max(0, returnElapsed - freeMinutes);
+      const rawFee = (charged / 60) * pricePerHour;
+      const dailyCap = billingRules[0]?.dailyCap ?? 30;
+      const fee = Math.round(Math.min(rawFee, dailyCap) * 100) / 100;
+      setToast(`归还成功！扣费 ¥${fee.toFixed(2)}`);
+      setReturnRental(null);
+      setReturnLocationId("");
+      if (selected?.id === returnRental.id) {
+        setSelected(null);
+      }
+    } else {
+      setToast("归还失败，请检查归还点位");
+    }
+  };
+
+  const openReturnModal = (r: RentalRecord) => {
+    setReturnRental(r);
+    setReturnLocationId(r.borrowLocationId);
+  };
+
   return (
     <div className="space-y-6">
+      {toast && (
+        <div className="fixed top-6 right-6 z-[100] flex items-center gap-2 rounded-xl bg-slate-800 border border-teal-500/40 px-5 py-3 shadow-2xl text-sm text-teal-300 animate-in fade-in slide-in-from-top-2">
+          <CheckCircle2 className="w-4 h-4 text-teal-400 shrink-0" />
+          {toast}
+        </div>
+      )}
+
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-white">借还记录</h1>
+        <button
+          onClick={() => setBorrowOpen(true)}
+          className="flex items-center gap-2 rounded-lg bg-teal-600 hover:bg-teal-500 px-4 py-2 text-sm font-medium text-white transition-colors"
+        >
+          <Zap className="w-4 h-4" />
+          扫码借出
+        </button>
       </div>
 
       <div className="flex flex-wrap items-center gap-3 rounded-xl bg-slate-900 p-4 border border-slate-700/50">
@@ -170,6 +259,7 @@ export default function Rentals() {
               <th className="text-left px-4 py-3 font-medium">费用</th>
               <th className="text-left px-4 py-3 font-medium">状态</th>
               <th className="text-left px-4 py-3 font-medium">支付状态</th>
+              <th className="text-left px-4 py-3 font-medium">操作</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-700/50">
@@ -224,12 +314,26 @@ export default function Rentals() {
                     {PAYMENT_STATUS_LABELS[r.paymentStatus]}
                   </span>
                 </td>
+                <td className="px-4 py-3">
+                  {r.status === "borrowed" && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openReturnModal(r);
+                      }}
+                      className="flex items-center gap-1 rounded-md bg-teal-600/20 hover:bg-teal-600/30 border border-teal-500/30 px-2.5 py-1 text-xs font-medium text-teal-400 transition-colors"
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                      归还
+                    </button>
+                  )}
+                </td>
               </tr>
             ))}
             {filtered.length === 0 && (
               <tr>
                 <td
-                  colSpan={11}
+                  colSpan={12}
                   className="px-4 py-12 text-center text-slate-500"
                 >
                   暂无匹配记录
@@ -239,6 +343,160 @@ export default function Rentals() {
           </tbody>
         </table>
       </div>
+
+      {borrowOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          onClick={() => setBorrowOpen(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl bg-slate-900 border border-slate-700/50 shadow-2xl overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3 bg-gradient-to-r from-teal-600 to-teal-500 px-6 py-4">
+              <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-white/20">
+                <Zap className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold text-white">扫码借出</h2>
+                <p className="text-teal-100 text-xs mt-0.5">借出充电宝给用户</p>
+              </div>
+              <button
+                onClick={() => setBorrowOpen(false)}
+                className="ml-auto text-white/70 hover:text-white transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-5">
+              <div className="space-y-2">
+                <label className="text-sm text-slate-400">借出点位</label>
+                <select
+                  value={borrowLocationId}
+                  onChange={(e) => setBorrowLocationId(e.target.value)}
+                  className="w-full rounded-lg bg-slate-800 border border-slate-700/50 px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-teal-600"
+                >
+                  <option value="">请选择点位</option>
+                  {activeLocations.map((loc) => (
+                    <option key={loc.id} value={loc.id}>
+                      {loc.name}（可用 {loc.availablePowerBanks} 个）
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm text-slate-400">用户姓名</label>
+                <input
+                  value={borrowName}
+                  onChange={(e) => setBorrowName(e.target.value)}
+                  placeholder="请输入用户姓名"
+                  className="w-full rounded-lg bg-slate-800 border border-slate-700/50 px-3 py-2.5 text-sm text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-teal-600"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm text-slate-400">手机号</label>
+                <input
+                  value={borrowPhone}
+                  onChange={(e) => setBorrowPhone(e.target.value)}
+                  placeholder="请输入手机号"
+                  className="w-full rounded-lg bg-slate-800 border border-slate-700/50 px-3 py-2.5 text-sm text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-teal-600"
+                />
+              </div>
+
+              <button
+                onClick={handleBorrow}
+                disabled={!borrowLocationId || !borrowName.trim() || !borrowPhone.trim()}
+                className="w-full rounded-lg bg-teal-600 hover:bg-teal-500 disabled:opacity-40 disabled:cursor-not-allowed px-4 py-2.5 text-sm font-medium text-white transition-colors"
+              >
+                确认借出
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {returnRental && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          onClick={() => {
+            setReturnRental(null);
+            setReturnLocationId("");
+          }}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl bg-slate-900 border border-slate-700/50 p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-5">
+              <div className="flex items-center gap-2 text-teal-400">
+                <RotateCcw className="w-5 h-5" />
+                <h2 className="text-lg font-semibold text-white">归还充电宝</h2>
+              </div>
+              <button
+                onClick={() => {
+                  setReturnRental(null);
+                  setReturnLocationId("");
+                }}
+                className="text-slate-500 hover:text-slate-300 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="rounded-lg bg-slate-800/50 p-4 space-y-3 mb-5">
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <span className="text-slate-500">用户</span>
+                  <p className="text-slate-200 mt-0.5">{returnRental.userName}</p>
+                </div>
+                <div>
+                  <span className="text-slate-500">手机号</span>
+                  <p className="text-slate-200 font-mono mt-0.5">{returnRental.userPhone}</p>
+                </div>
+                <div>
+                  <span className="text-slate-500">借出点位</span>
+                  <p className="text-slate-200 mt-0.5">{returnRental.borrowLocationName}</p>
+                </div>
+                <div>
+                  <span className="text-slate-500">借出时间</span>
+                  <p className="text-slate-200 mt-0.5">{formatDate(returnRental.borrowTime)}</p>
+                </div>
+                <div className="col-span-2">
+                  <span className="text-slate-500">已借时长</span>
+                  <p className="text-amber-400 font-mono mt-0.5">{formatDuration(returnElapsed)}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-2 mb-5">
+              <label className="text-sm text-slate-400">归还点位</label>
+              <select
+                value={returnLocationId}
+                onChange={(e) => setReturnLocationId(e.target.value)}
+                className="w-full rounded-lg bg-slate-800 border border-slate-700/50 px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-teal-600"
+              >
+                <option value="">请选择归还点位</option>
+                {activeLocations.map((loc) => (
+                  <option key={loc.id} value={loc.id}>
+                    {loc.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <button
+              onClick={handleReturn}
+              disabled={!returnLocationId}
+              className="w-full rounded-lg bg-teal-600 hover:bg-teal-500 disabled:opacity-40 disabled:cursor-not-allowed px-4 py-2.5 text-sm font-medium text-white transition-colors"
+            >
+              确认归还
+            </button>
+          </div>
+        </div>
+      )}
 
       {selected && (
         <div
@@ -251,12 +509,27 @@ export default function Rentals() {
           >
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-lg font-semibold text-white">借还详情</h2>
-              <button
-                onClick={() => setSelected(null)}
-                className="text-slate-500 hover:text-slate-300 transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-2">
+                {selected.status === "borrowed" && (
+                  <button
+                    onClick={() => {
+                      const r = selected;
+                      setSelected(null);
+                      openReturnModal(r);
+                    }}
+                    className="flex items-center gap-1.5 rounded-lg bg-teal-600/20 hover:bg-teal-600/30 border border-teal-500/30 px-3 py-1.5 text-sm font-medium text-teal-400 transition-colors"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    归还
+                  </button>
+                )}
+                <button
+                  onClick={() => setSelected(null)}
+                  className="text-slate-500 hover:text-slate-300 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
             <div className="space-y-5">
