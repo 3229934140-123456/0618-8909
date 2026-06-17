@@ -16,12 +16,28 @@ export interface Location {
   createdAt: string;
 }
 
+export interface PowerBankMovement {
+  id: string;
+  powerBankId: string;
+  fromLocationId: string;
+  fromLocationName: string;
+  fromCabinetId: string;
+  fromCabinetNo: string;
+  toLocationId: string;
+  toLocationName: string;
+  toCabinetId: string;
+  toCabinetNo: string;
+  movedAt: string;
+  type: "rental_return" | "manual_transfer";
+}
+
 export interface PowerBank {
   id: string;
   slotIndex: number;
   batteryLevel: number;
   status: "available" | "borrowed" | "charging" | "needs_recycle" | "fault";
   lastReportTime: string;
+  movementHistory?: PowerBankMovement[];
 }
 
 export interface Cabinet {

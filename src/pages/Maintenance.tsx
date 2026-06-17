@@ -11,6 +11,7 @@ import {
   User,
   LayoutGrid,
   List,
+  ArrowRight,
 } from "lucide-react";
 import { useStore } from "@/store";
 import {
@@ -18,16 +19,17 @@ import {
   TASK_STATUS_LABELS,
   URGENCY_LABELS,
 } from "@/types";
-import type { MaintenanceTask } from "@/types";
+import type { MaintenanceTask, PowerBankMovement } from "@/types";
 import { cn } from "@/lib/utils";
 
-type TabKey = "restock" | "recycle" | "repair" | "all";
+type TabKey = "restock" | "recycle" | "repair" | "all" | "movements";
 
 const tabs: { key: TabKey; label: string }[] = [
   { key: "restock", label: "补货任务" },
   { key: "recycle", label: "回收充电" },
   { key: "repair", label: "维修任务" },
   { key: "all", label: "全部" },
+  { key: "movements", label: "设备移动轨迹" },
 ];
 
 const urgencyColors: Record<MaintenanceTask["urgency"], string> = {
@@ -71,13 +73,15 @@ function relativeTime(dateStr: string): string {
 }
 
 export default function Maintenance() {
-  const { maintenanceTasks, updateMaintenanceTask } = useStore();
+  const { maintenanceTasks, powerBankMovements, updateMaintenanceTask } = useStore();
   const [activeTab, setActiveTab] = useState<TabKey>("all");
   const [viewMode, setViewMode] = useState<"kanban" | "list">("kanban");
 
-  const filteredTasks = maintenanceTasks.filter((t) =>
-    activeTab === "all" ? true : t.type === activeTab
-  );
+  const filteredTasks = activeTab !== "movements"
+    ? maintenanceTasks.filter((t) =>
+        activeTab === "all" ? true : t.type === activeTab
+      )
+    : [];
 
   const pendingCount = maintenanceTasks.filter(
     (t) => t.status === "pending"
@@ -105,6 +109,60 @@ export default function Maintenance() {
       status: "completed",
       completedAt: new Date().toISOString(),
     });
+  }
+
+  const movementTypeColors: Record<PowerBankMovement["type"], string> = {
+    rental_return: "bg-teal-500/20 text-teal-400",
+    manual_transfer: "bg-amber-500/20 text-amber-400",
+  };
+
+  const movementTypeLabels: Record<PowerBankMovement["type"], string> = {
+    rental_return: "借还流转",
+    manual_transfer: "人工调拨",
+  };
+
+  function MovementCard({ movement }: { movement: PowerBankMovement }) {
+    return (
+      <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <span className="font-mono text-xs text-slate-300">
+            充电宝ID: {movement.powerBankId}
+          </span>
+          <span className="text-xs text-slate-500">
+            {relativeTime(movement.movedAt)}
+          </span>
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-white truncate">
+              {movement.fromLocationName}
+            </p>
+            <p className="text-xs text-slate-500">
+              柜机 #{movement.fromCabinetNo}
+            </p>
+          </div>
+          <ArrowRight className="w-5 h-5 text-teal-400 flex-shrink-0" />
+          <div className="flex-1 min-w-0 text-right">
+            <p className="text-sm font-medium text-white truncate">
+              {movement.toLocationName}
+            </p>
+            <p className="text-xs text-slate-500">
+              柜机 #{movement.toCabinetNo}
+            </p>
+          </div>
+        </div>
+        <div>
+          <span
+            className={cn(
+              "inline-flex items-center px-2 py-0.5 rounded text-xs font-medium",
+              movementTypeColors[movement.type]
+            )}
+          >
+            {movementTypeLabels[movement.type]}
+          </span>
+        </div>
+      </div>
+    );
   }
 
   function TaskCard({ task }: { task: MaintenanceTask }) {
@@ -252,7 +310,33 @@ export default function Maintenance() {
         ))}
       </div>
 
-      {viewMode === "kanban" ? (
+      {activeTab === "movements" ? (
+        <div className="space-y-4">
+          <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-white">充电宝跨点位归还轨迹</h2>
+                <p className="text-sm text-slate-400 mt-1">
+                  共 {powerBankMovements.length} 次移动
+                </p>
+              </div>
+            </div>
+          </div>
+          {powerBankMovements.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {[...powerBankMovements]
+                .sort((a, b) => new Date(b.movedAt).getTime() - new Date(a.movedAt).getTime())
+                .map((movement) => (
+                  <MovementCard key={movement.id} movement={movement} />
+                ))}
+            </div>
+          ) : (
+            <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-8 text-center">
+              <p className="text-slate-500">暂无设备移动记录</p>
+            </div>
+          )}
+        </div>
+      ) : viewMode === "kanban" ? (
         <div className="grid grid-cols-3 gap-4">
           {columnConfig.map((col) => {
             const colTasks = filteredTasks.filter(

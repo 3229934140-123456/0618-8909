@@ -108,7 +108,7 @@ const emptyForm: FormState = {
 };
 
 export default function Locations() {
-  const { locations, cabinets, addLocationWithCabinets, addCabinetToLocation, updateCabinet, deleteCabinet } = useStore();
+  const { locations, cabinets, addLocationWithCabinets, addCabinetToLocation, updateCabinetWithSlots, deleteCabinet } = useStore();
 
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
@@ -461,7 +461,7 @@ export default function Locations() {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-300 mb-1.5">
-                      充电宝数量(槽位)
+                      充电宝数量
                     </label>
                     <input
                       type="number"
@@ -506,7 +506,7 @@ function DetailPanel({
   cabinets: Cabinet[];
   onClose: () => void;
 }) {
-  const { addCabinetToLocation, updateCabinet, deleteCabinet } = useStore();
+  const { addCabinetToLocation, updateCabinetWithSlots, deleteCabinet } = useStore();
 
   const [addingCabinet, setAddingCabinet] = useState(false);
   const [newCabinetNo, setNewCabinetNo] = useState("");
@@ -515,6 +515,8 @@ function DetailPanel({
   const [editingCabinetId, setEditingCabinetId] = useState<string | null>(null);
   const [editCabinetNo, setEditCabinetNo] = useState("");
   const [editCabinetStatus, setEditCabinetStatus] = useState<Cabinet["status"]>("online");
+  const [editTotalSlots, setEditTotalSlots] = useState(0);
+  const [editPowerBankCount, setEditPowerBankCount] = useState(0);
 
   const Icon = TYPE_ICON[location.type];
 
@@ -530,19 +532,25 @@ function DetailPanel({
     setEditingCabinetId(cab.id);
     setEditCabinetNo(cab.cabinetNo);
     setEditCabinetStatus(cab.status);
+    setEditTotalSlots(cab.totalSlots);
+    setEditPowerBankCount(cab.powerBanks.length);
   };
 
   const cancelEdit = () => {
     setEditingCabinetId(null);
     setEditCabinetNo("");
     setEditCabinetStatus("online");
+    setEditTotalSlots(0);
+    setEditPowerBankCount(0);
   };
 
   const saveEdit = () => {
     if (!editCabinetNo.trim() || !editingCabinetId) return;
-    updateCabinet(editingCabinetId, {
+    updateCabinetWithSlots(editingCabinetId, {
       cabinetNo: editCabinetNo.trim(),
       status: editCabinetStatus,
+      totalSlots: Number(editTotalSlots),
+      powerBankCount: Number(editPowerBankCount),
     });
     cancelEdit();
   };
@@ -677,7 +685,7 @@ function DetailPanel({
                     总槽位
                   </th>
                   <th className="px-4 py-2 font-medium text-center">
-                    可用数
+                    充电宝数量
                   </th>
                   <th className="px-4 py-2 font-medium">状态</th>
                   <th className="px-4 py-2 font-medium text-center">操作</th>
@@ -694,36 +702,52 @@ function DetailPanel({
                           className="w-full px-2.5 py-1 rounded-md bg-slate-900 border border-slate-700 text-sm text-white focus:outline-none focus:border-teal-500"
                         />
                       </td>
-                      <td className="px-4 py-2 text-center text-slate-300">
-                        {cab.totalSlots}
+                      <td className="px-4 py-2 text-center">
+                        <span className="text-slate-300 font-mono">{editTotalSlots}</span>
                       </td>
                       <td className="px-4 py-2 text-center">
-                        <span
-                          className={
-                            cab.availableCount <= 3
-                              ? "text-red-400"
-                              : "text-teal-400"
-                          }
-                        >
-                          {cab.availableCount}
-                        </span>
+                        <span className="text-slate-400 font-mono">{editPowerBankCount}</span>
                       </td>
                       <td className="px-4 py-2">
-                        <select
-                          value={editCabinetStatus}
-                          onChange={(e) =>
-                            setEditCabinetStatus(e.target.value as Cabinet["status"])
-                          }
-                          className="px-2.5 py-1 rounded-md bg-slate-900 border border-slate-700 text-sm text-white focus:outline-none focus:border-teal-500 appearance-none"
-                        >
-                          {(["online", "offline", "fault"] as Cabinet["status"][]).map(
-                            (s) => (
-                              <option key={s} value={s}>
-                                {CABINET_STATUS_LABELS[s]}
-                              </option>
-                            )
-                          )}
-                        </select>
+                        <div className="space-y-2">
+                          <select
+                            value={editCabinetStatus}
+                            onChange={(e) =>
+                              setEditCabinetStatus(e.target.value as Cabinet["status"])
+                            }
+                            className="w-full px-2.5 py-1 rounded-md bg-slate-900 border border-slate-700 text-sm text-white focus:outline-none focus:border-teal-500 appearance-none"
+                          >
+                            {(["online", "offline", "fault"] as Cabinet["status"][]).map(
+                              (s) => (
+                                <option key={s} value={s}>
+                                  {CABINET_STATUS_LABELS[s]}
+                                </option>
+                              )
+                            )}
+                          </select>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className="block text-xs text-slate-400 mb-0.5">总槽位数</label>
+                              <input
+                                type="number"
+                                value={editTotalSlots}
+                                onChange={(e) => setEditTotalSlots(Number(e.target.value) || 0)}
+                                min={1}
+                                className="w-full px-2 py-1 rounded-md bg-slate-900 border border-slate-700 text-sm text-white focus:outline-none focus:border-teal-500"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs text-slate-400 mb-0.5">充电宝数量</label>
+                              <input
+                                type="number"
+                                value={editPowerBankCount}
+                                onChange={(e) => setEditPowerBankCount(Number(e.target.value) || 0)}
+                                min={0}
+                                className="w-full px-2 py-1 rounded-md bg-slate-900 border border-slate-700 text-sm text-white focus:outline-none focus:border-teal-500"
+                              />
+                            </div>
+                          </div>
+                        </div>
                       </td>
                       <td className="px-4 py-2">
                         <div className="flex items-center justify-center gap-1">
@@ -754,15 +778,21 @@ function DetailPanel({
                         {cab.totalSlots}
                       </td>
                       <td className="px-4 py-2 text-center">
-                        <span
-                          className={
-                            cab.availableCount <= 3
-                              ? "text-red-400"
-                              : "text-teal-400"
-                          }
-                        >
-                          {cab.availableCount}
-                        </span>
+                        <div className="space-y-0.5">
+                          <span className="text-slate-200 font-medium">{cab.powerBanks.length}</span>
+                          <div className="text-xs">
+                            <span className="text-slate-500">可用: </span>
+                            <span
+                              className={
+                                cab.availableCount <= 3
+                                  ? "text-red-400"
+                                  : "text-teal-400"
+                              }
+                            >
+                              {cab.availableCount}
+                            </span>
+                          </div>
+                        </div>
                       </td>
                       <td className="px-4 py-2">
                         <span
