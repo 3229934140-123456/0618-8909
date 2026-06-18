@@ -141,6 +141,7 @@ export default function Locations() {
         latitude: Number(form.latitude) || 0,
         cabinetCount: 0,
         totalSlots: 0,
+        totalPowerBanks: 0,
         availablePowerBanks: 0,
         borrowRate: 0,
         dailyIncome: 0,
@@ -232,7 +233,7 @@ export default function Locations() {
               <th className="px-4 py-3 font-medium">类型</th>
               <th className="px-4 py-3 font-medium">地址</th>
               <th className="px-4 py-3 font-medium text-center">柜机数</th>
-              <th className="px-4 py-3 font-medium text-center">可用/总槽位</th>
+              <th className="px-4 py-3 font-medium text-center">可用/充电宝/槽位</th>
               <th className="px-4 py-3 font-medium">借用率</th>
               <th className="px-4 py-3 font-medium text-right">日收入</th>
               <th className="px-4 py-3 font-medium text-center">故障率</th>
@@ -267,12 +268,23 @@ export default function Locations() {
                     <td className="px-4 py-3 text-center text-slate-300">
                       {loc.cabinetCount}
                     </td>
-                    <td className="px-4 py-3 text-center text-slate-300">
-                      <span className="text-teal-400">
-                        {loc.availablePowerBanks}
-                      </span>
-                      <span className="text-slate-600"> / </span>
-                      <span>{loc.totalSlots}</span>
+                    <td className="px-4 py-3 text-center">
+                      <div className="space-y-0.5">
+                        <span className="text-teal-400">
+                          {loc.availablePowerBanks}
+                        </span>
+                        <span className="text-slate-600"> / </span>
+                        <span className="text-slate-200">
+                          {loc.totalPowerBanks}
+                        </span>
+                        <span className="text-slate-600"> / </span>
+                        <span className="text-slate-400">
+                          {loc.totalSlots}
+                        </span>
+                        <div className="text-[10px] text-slate-500">
+                          可用 / 充电宝 / 槽位
+                        </div>
+                      </div>
                     </td>
                     <td className="px-4 py-3">
                       <BorrowRateBar rate={loc.borrowRate} />
@@ -557,14 +569,21 @@ function DetailPanel({
       powerBankCount: Number(editPowerBankCount),
     });
 
+    setEditTotalSlots(result.actualTotalSlots);
+    setEditPowerBankCount(result.actualPowerBankCount);
+
     if (result.adjusted) {
-      const cab = cabinets.find((c) => c.id === editingCabinetId);
-      const nonAvailableCount = cab
-        ? cab.powerBanks.filter((p) => p.status !== "available").length
-        : 0;
+      const parts: string[] = [
+        `已校正：总槽位 ${result.actualTotalSlots}，充电宝 ${result.actualPowerBankCount} 个`,
+      ];
+      if (result.nonAvailableKept > 0) {
+        parts.push(
+          `${result.nonAvailableKept} 个非可用状态设备无法移除`
+        );
+      }
       setSaveMessage({
         type: "warning",
-        text: `数量已调整：实际充电宝 ${result.actualPowerBankCount} 个（有 ${nonAvailableCount} 个非可用状态设备无法移除），总槽位 ${result.actualTotalSlots} 个`,
+        text: parts.join("（") + "）",
       });
     } else {
       setSaveMessage({
@@ -573,8 +592,7 @@ function DetailPanel({
       });
     }
 
-    setTimeout(() => setSaveMessage(null), 4000);
-    cancelEdit();
+    setTimeout(() => setSaveMessage(null), 5000);
   };
 
   const handleDelete = (cab: Cabinet) => {

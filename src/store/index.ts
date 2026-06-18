@@ -50,7 +50,7 @@ interface AppState {
       totalSlots?: number;
       powerBankCount?: number;
     }
-  ) => { actualPowerBankCount: number; actualTotalSlots: number; adjusted: boolean };
+  ) => { actualPowerBankCount: number; actualTotalSlots: number; adjusted: boolean; nonAvailableKept: number };
   deleteCabinet: (id: string) => void;
   addCabinetToLocation: (
     locationId: string,
@@ -85,6 +85,10 @@ function recalcLocationStats(
   return locations.map((loc) => {
     const locCabs = cabinets.filter((c) => c.locationId === loc.id);
     const totalSlots = locCabs.reduce((s, c) => s + c.totalSlots, 0);
+    const totalPowerBanks = locCabs.reduce(
+      (s, c) => s + c.powerBanks.length,
+      0
+    );
     const available = locCabs.reduce((s, c) => s + c.availableCount, 0);
     const allPBs = locCabs.flatMap((c) => c.powerBanks);
     const faultPBs = allPBs.filter(
@@ -95,6 +99,7 @@ function recalcLocationStats(
       ...loc,
       cabinetCount: locCabs.length,
       totalSlots,
+      totalPowerBanks,
       availablePowerBanks: available,
       faultRate: totalPBs > 0 ? faultPBs / totalPBs : 0,
     };
@@ -152,6 +157,7 @@ export const useStore = create<AppState>()(
           ...location,
           cabinetCount: 1,
           totalSlots: slotCount,
+          totalPowerBanks: slotCount,
           availablePowerBanks: slotCount,
         };
         set((state) => {
@@ -180,6 +186,7 @@ export const useStore = create<AppState>()(
           actualPowerBankCount: 0,
           actualTotalSlots: 0,
           adjusted: false,
+          nonAvailableKept: 0,
         };
         set((state) => {
           const cabinets = state.cabinets.map((cab) => {
@@ -224,6 +231,10 @@ export const useStore = create<AppState>()(
               (p) => p.status === "available"
             ).length;
 
+            const nonAvailableKept = pbs.filter(
+              (p) => p.status !== "available"
+            ).length;
+
             if (
               data.powerBankCount !== undefined &&
               data.powerBankCount !== pbs.length
@@ -238,6 +249,7 @@ export const useStore = create<AppState>()(
             }
             result.actualPowerBankCount = pbs.length;
             result.actualTotalSlots = newTotalSlots;
+            result.nonAvailableKept = nonAvailableKept;
 
             return {
               ...cab,
@@ -393,20 +405,13 @@ export const useStore = create<AppState>()(
         );
         let targetCabinet: Cabinet | null = null;
         for (const cab of returnCabinets) {
-          if (cab.powerBanks.length < cab.totalSlots) {
+          const hasEmptySlot = cab.powerBanks.length < cab.totalSlots;
+          const hasBorrowedSlot = cab.powerBanks.some(
+            (p) => p.status === "borrowed"
+          );
+          if (hasEmptySlot || hasBorrowedSlot) {
             targetCabinet = cab;
             break;
-          }
-        }
-        if (!targetCabinet) {
-          for (const cab of returnCabinets) {
-            if (
-              cab.powerBanks.length < cab.totalSlots ||
-              cab.powerBanks.some((p) => p.status === "borrowed")
-            ) {
-              targetCabinet = cab;
-              break;
-            }
           }
         }
         if (!targetCabinet) return false;
@@ -479,45 +484,87 @@ export const useStore = create<AppState>()(
               };
             }
             if (cab.id === targetCabinet!.id) {
-              const maxSlot =
-                cab.powerBanks.length > 0
-                  ? Math.max(...cab.powerBanks.map((p) => p.slotIndex))
-                  : 0;
-              const prevHistory =
-                originalPBFromBorrow?.movementHistory || [];
+              const borrowedPB = cab.powerBanks.find(
+                (p) => p.status === "borrowed"
+              );
+              let finalPBs: PowerBank[];
 
-              const movement: PowerBankMovement = {
-                id: `move-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-                powerBankId: rental.powerBankId!,
-                fromLocationId: borrowCabinet?.locationId || "",
-                fromLocationName: borrowLoc?.name || "",
-                fromCabinetId: borrowCabinet?.id || "",
-                fromCabinetNo: borrowCabinet?.cabinetNo || "",
-                toLocationId: targetCabinet!.locationId,
-                toLocationName: returnLoc.name,
-                toCabinetId: targetCabinet!.id,
-                toCabinetNo: targetCabinet!.cabinetNo,
-                movedAt: now.toISOString(),
-                type: "rental_return",
-              };
-              newMovements.push(movement);
+              if (
+                cab.powerBanks.length >= cab.totalSlots &&
+                borrowedPB
+              ) {
+                const movement: PowerBankMovement = {
+                  id: `move-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                  powerBankId: rental.powerBankId!,
+                  fromLocationId: borrowCabinet?.locationId || "",
+                  fromLocationName: borrowLoc?.name || "",
+                  fromCabinetId: borrowCabinet?.id || "",
+                  fromCabinetNo: borrowCabinet?.cabinetNo || "",
+                  toLocationId: targetCabinet!.locationId,
+                  toLocationName: returnLoc.name,
+                  toCabinetId: targetCabinet!.id,
+                  toCabinetNo: targetCabinet!.cabinetNo,
+                  movedAt: now.toISOString(),
+                  type: "rental_return",
+                };
+                newMovements.push(movement);
 
-              const newPB: PowerBank = {
-                id: rental.powerBankId!,
-                slotIndex: maxSlot + 1,
-                batteryLevel: pbBattery,
-                status: pbNewStatus,
-                lastReportTime: now.toISOString(),
-                movementHistory: [...prevHistory, movement],
-              };
+                const newPB: PowerBank = {
+                  id: rental.powerBankId!,
+                  slotIndex: borrowedPB.slotIndex,
+                  batteryLevel: pbBattery,
+                  status: pbNewStatus,
+                  lastReportTime: now.toISOString(),
+                  movementHistory: [
+                    ...(originalPBFromBorrow?.movementHistory || []),
+                    movement,
+                  ],
+                };
+                finalPBs = cab.powerBanks.map((p) =>
+                  p.id === borrowedPB.id ? newPB : p
+                );
+              } else {
+                const maxSlot =
+                  cab.powerBanks.length > 0
+                    ? Math.max(...cab.powerBanks.map((p) => p.slotIndex))
+                    : 0;
 
-              const newPBs = [...cab.powerBanks, newPB];
-              const availableCount = newPBs.filter(
+                const movement: PowerBankMovement = {
+                  id: `move-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                  powerBankId: rental.powerBankId!,
+                  fromLocationId: borrowCabinet?.locationId || "",
+                  fromLocationName: borrowLoc?.name || "",
+                  fromCabinetId: borrowCabinet?.id || "",
+                  fromCabinetNo: borrowCabinet?.cabinetNo || "",
+                  toLocationId: targetCabinet!.locationId,
+                  toLocationName: returnLoc.name,
+                  toCabinetId: targetCabinet!.id,
+                  toCabinetNo: targetCabinet!.cabinetNo,
+                  movedAt: now.toISOString(),
+                  type: "rental_return",
+                };
+                newMovements.push(movement);
+
+                const newPB: PowerBank = {
+                  id: rental.powerBankId!,
+                  slotIndex: maxSlot + 1,
+                  batteryLevel: pbBattery,
+                  status: pbNewStatus,
+                  lastReportTime: now.toISOString(),
+                  movementHistory: [
+                    ...(originalPBFromBorrow?.movementHistory || []),
+                    movement,
+                  ],
+                };
+                finalPBs = [...cab.powerBanks, newPB];
+              }
+
+              const availableCount = finalPBs.filter(
                 (p) => p.status === "available"
               ).length;
               return {
                 ...cab,
-                powerBanks: newPBs,
+                powerBanks: finalPBs,
                 availableCount,
                 lastHeartbeat: now.toISOString(),
               };
@@ -605,10 +652,7 @@ export const useStore = create<AppState>()(
         const activeLocations = state.locations.filter(
           (l) => l.status === "active"
         );
-        if (
-          Math.random() < 0.4 &&
-          activeLocations.length >= 2
-        ) {
+        if (activeLocations.length >= 2) {
           const onlineCabs = updatedCabinets.filter(
             (c) => c.status === "online" && c.powerBanks.length > 0
           );
@@ -620,13 +664,23 @@ export const useStore = create<AppState>()(
           );
 
           if (fromCabs.length > 0 && toCabs.length > 0) {
-            const fromCab = fromCabs[Math.floor(Math.random() * fromCabs.length)];
-            let toCab = toCabs[Math.floor(Math.random() * toCabs.length)];
-            
-            let attempts = 0;
-            while (toCab.locationId === fromCab.locationId && attempts < 10) {
+            const crossLocationToCabs = toCabs.filter(
+              (tc) =>
+                tc.locationId !== fromCabs[0].locationId
+            );
+
+            let fromCab: Cabinet, toCab: Cabinet;
+            if (crossLocationToCabs.length > 0) {
+              fromCab = fromCabs[Math.floor(Math.random() * fromCabs.length)];
+              toCab = crossLocationToCabs[Math.floor(Math.random() * crossLocationToCabs.length)];
+            } else {
+              fromCab = fromCabs[Math.floor(Math.random() * fromCabs.length)];
               toCab = toCabs[Math.floor(Math.random() * toCabs.length)];
-              attempts++;
+              let attempts = 0;
+              while (toCab.locationId === fromCab.locationId && attempts < 10) {
+                toCab = toCabs[Math.floor(Math.random() * toCabs.length)];
+                attempts++;
+              }
             }
 
             if (toCab.locationId !== fromCab.locationId) {
@@ -670,17 +724,14 @@ export const useStore = create<AppState>()(
                     return {
                       ...cab,
                       powerBanks: newPBs,
-                      availableCount:
-                        cab.availableCount - 1,
+                      availableCount: cab.availableCount - 1,
                       lastHeartbeat: new Date().toISOString(),
                     };
                   }
                   if (cab.id === toCab.id) {
                     const maxSlot =
                       cab.powerBanks.length > 0
-                        ? Math.max(
-                            ...cab.powerBanks.map((p) => p.slotIndex)
-                          )
+                        ? Math.max(...cab.powerBanks.map((p) => p.slotIndex))
                         : 0;
                     const newPB: PowerBank = {
                       ...movedPB,
@@ -694,8 +745,7 @@ export const useStore = create<AppState>()(
                     return {
                       ...cab,
                       powerBanks: [...cab.powerBanks, newPB],
-                      availableCount:
-                        cab.availableCount + 1,
+                      availableCount: cab.availableCount + 1,
                       lastHeartbeat: new Date().toISOString(),
                     };
                   }
@@ -851,6 +901,14 @@ export const useStore = create<AppState>()(
     }),
     {
       name: "powerbank-storage",
+      onRehydrateStorage: () => (state) => {
+        if (state) {
+          state.locations = recalcLocationStats(
+            state.locations,
+            state.cabinets
+          );
+        }
+      },
     }
   )
 );

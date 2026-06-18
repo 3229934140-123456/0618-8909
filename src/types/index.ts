@@ -8,6 +8,7 @@ export interface Location {
   businessHours: string;
   cabinetCount: number;
   totalSlots: number;
+  totalPowerBanks: number;
   availablePowerBanks: number;
   borrowRate: number;
   dailyIncome: number;
